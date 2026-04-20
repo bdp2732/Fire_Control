@@ -1,0 +1,20 @@
+# 앱 이름 
+display_name: "UBoat Fire Control"
+
+# 프로젝트 이름 
+product_name: "U_Boat_TDC"
+
+
+assets_dir: assets
+
+version: "1.0.0"
+
+android:
+  # app ID 
+  package_name: "com.bidope.uboot_tdc"
+  
+  # 빌드 번호
+  build_number: 1
+
+  # 아이콘 경로 
+  icon: assets/uboat_photo.png
