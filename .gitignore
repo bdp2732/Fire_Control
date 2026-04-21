@@ -1,0 +1,6 @@
+FC_env/
+build/
+.dart_tool/
+.flet_publications/
+__pycache__/
+*.apk

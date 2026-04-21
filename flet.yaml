@@ -1,0 +1,8 @@
+display_name: "U Boat Fire Control v1.3"
+product_name: "UBoatFireControl"
+version: "1.3.0"
+
+android:
+  package_name: "com.bidope.uboat.v130"
+  version_code: 13
+  icon: "assets/icon.png"
