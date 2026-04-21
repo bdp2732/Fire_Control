@@ -2,159 +2,93 @@ import flet as ft
 import math
 
 def main(page: ft.Page):
-    # 아쉬워하셨던 앱 제목과 페이지 설정
-    page.title = "U-Boat Fire Control System v1.2"
+    page.title = "U-Boat Fire Control System v1.4"
     page.theme_mode = ft.ThemeMode.DARK
     page.padding = 20
-    # 화면 중앙 정렬 설정
-    page.vertical_alignment = ft.MainAxisAlignment.CENTER
-    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
     page.scroll = ft.ScrollMode.AUTO
 
-    # --- 입력창 생성 함수 (디자인 개선) ---
-    def create_input(label_text):
+    def create_input(label_text, value="0"):
         return ft.TextField(
             label=label_text,
+            value=value,
             text_align=ft.TextAlign.CENTER,
             keyboard_type=ft.KeyboardType.NUMBER,
-            border_color="bluegrey700",
-            focused_border_color="blue400", # 포커스 시 색상 변경
-            height=60, # 입력창 높이 확보
+            height=60,
         )
 
+
+    # 내 배 정보 (절대 속도 계산용)
+    own_speed_input = create_input("내 배 속도 (kts)", "0")
+    own_course_input = create_input("내 배 침로 (deg)", "0")
+    
+    # 관측 정보
     dist1_input = create_input("1차 거리 (m)")
-    bear1_input = create_input("1차 방위 (deg)")
-    time_input = create_input("시간 간격 (sec)")
+    bear1_input = create_input("1차 상대방위 (deg)")
+    time_input = create_input("측정 시간 (sec)")
     dist2_input = create_input("2차 거리 (m)")
-    bear2_input = create_input("2차 방위 (deg)")
-    
-    target_len_input = ft.TextField(
-        label="목표 함선 길이 (m)", 
-        value="150", 
-        visible=False,
-        text_align=ft.TextAlign.CENTER
-    )
-    salvo_count_input = ft.Slider(
-        min=2, max=4, divisions=2, 
-        label="사격 발수: {value}발", 
-        visible=False
-    )
-    
-    result_display = ft.Text(
-        value="데이터를 입력하고 FIRE!를 누르세요", 
-        size=18, 
-        color="amber", 
-        weight="bold",
-        text_align=ft.TextAlign.CENTER
-    )
+    bear2_input = create_input("2차 상대방위 (deg)")
 
-    # --- 모드 변경 핸들러 ---
-    def on_mode_change(e):
-        if aft_switch.value:
-            salvo_switch.value = False
-            salvo_switch.disabled = True
-        else:
-            salvo_switch.disabled = False
-            
-        target_len_input.visible = salvo_switch.value
-        salvo_count_input.visible = salvo_switch.value
-        page.update()
+    result_display = ft.Text(value="READY TO FIRE", size=18, color="amber", weight="bold")
 
-    aft_switch = ft.Switch(label="후방(Tube 5)", on_change=on_mode_change)
-    salvo_switch = ft.Switch(label="Salvo 모드", on_change=on_mode_change)
-
-    # --- 계산 함수 ---
     def calculate(e):
         try:
-            d1 = float(dist1_input.value)
-            b1 = float(bear1_input.value)
+            # 1. 값 읽어오기
+            v_own = float(own_speed_input.value) * 0.51444  # kts -> m/s 변환
+            c_own = float(own_course_input.value)
+            d1, b1 = float(dist1_input.value), float(bear1_input.value)
             t = float(time_input.value)
-            d2 = float(dist2_input.value)
-            b2 = float(bear2_input.value)
+            d2, b2 = float(dist2_input.value), float(bear2_input.value)
 
-            r1, r2 = math.radians(b1), math.radians(b2)
-            x1, y1 = d1 * math.sin(r1), d1 * math.cos(r1)
-            x2, y2 = d2 * math.sin(r2), d2 * math.cos(r2)
+            # 2. 내 배의 이동 거리 계산 (t초 동안)
+            own_dist_moved = v_own * t
+            # 내 배의 이동 벡터 (북쪽 0도 기준)
+            own_dx = own_dist_moved * math.sin(math.radians(c_own))
+            own_dy = own_dist_moved * math.cos(math.radians(c_own))
 
-            dist_moved = math.sqrt((x2-x1)**2 + (y2-y1)**2)
-            speed = (dist_moved / t) * 1.94384 if t > 0 else 0
-            course = math.degrees(math.atan2(x2-x1, y2-y1))
-            if course < 0: course += 360
+            # 3. 적함의 '절대 좌표' 계산
+            # 1차 측정 시 적함 위치 (내 시작점을 0,0으로 가정)
+            # b1은 내 침로 기준 상대 방위이므로 절대 방위로 변환
+            abs_b1 = (c_own + b1) % 360
+            x1 = d1 * math.sin(math.radians(abs_b1))
+            y1 = d1 * math.cos(math.radians(abs_b1))
 
-            aob_val = course - b2
-            
-            if aft_switch.value:
-                aob_val -= 180
+            # 2차 측정 시 적함 위치 (내 이동 좌표 + 측정된 상대 위치)
+            abs_b2 = (c_own + b2) % 360
+            x2 = own_dx + d2 * math.sin(math.radians(abs_b2))
+            y2 = own_dy + d2 * math.cos(math.radians(abs_b2))
 
+            # 4. 적함의 실제 이동 거리 및 속도 산출
+            target_dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+            abs_speed = (target_dist / t) * 1.94384  # m/s -> kts
+            abs_course = math.degrees(math.atan2(x2 - x1, y2 - y1)) % 360
+
+            # 5. AoB 산출 (적함 침로와 내 현재 방위의 관계)
+            # 사격 시점(2차 측정)의 내 위치와 적 위치 기준
+            aob_val = abs_course - abs_b2
             while aob_val > 180: aob_val -= 360
             while aob_val < -180: aob_val += 360
-            
             final_aob = 180 - abs(aob_val)
-            side = "우현(Starboard)" if aob_val >= 0 else "좌현(Port)"
+            side = "우현(STBD)" if aob_val >= 0 else "좌현(PORT)"
 
-            output = f"▶ 속도: {speed:.2f} kts\n▶ 침로: {course:.1f}°\n▶ AoB: {final_aob:.1f}° ({side})"
-
-            if salvo_switch.value and not aft_switch.value:
-                t_len = float(target_len_input.value)
-                apparent_len = t_len * math.sin(math.radians(final_aob))
-                total_spread = math.degrees(math.atan(apparent_len / d2)) if d2 > 0 else 0
-                num_torp = int(salvo_count_input.value)
-                interval = total_spread / (num_torp - 1) if num_torp > 1 else 0
-                output += f"\n\n[SALVO 정보]\n전체 확산각: {total_spread:.1f}°\n발당 간격: {interval:.1f}°"
-
-            result_display.value = output
-        except Exception:
-            result_display.value = "입력 오류: 숫자를 확인하세요"
-        
+            result_display.value = (
+                f"▶ 적 절대 속도: {abs_speed:.2f} kts\n"
+                f"▶ 적 절대 침로: {abs_course:.1f}°\n"
+                f"▶ 실시간 AoB: {final_aob:.1f}° ({side})"
+            )
+        except Exception as ex:
+            result_display.value = "입력 데이터 오류"
         page.update()
 
-    # --- 화면 구성 (레이아웃 개선) ---
-    # 전체를 감싸는 컨테이너로 여백과 중앙 배치를 조절합니다.
-    layout = ft.Container(
-        content=ft.Column(
-            [
-                ft.Text("7C Fire Control Computer", size=28, weight="bold", color="bluegrey100"),
-                ft.Divider(height=10, color="bluegrey800"),
-                
-                # 스위치 영역
-                ft.Row([aft_switch, salvo_switch], alignment=ft.MainAxisAlignment.CENTER),
-                
-                # 입력창 영역 (spacing으로 간격 확보)
-                ft.Column([
-                    dist1_input, bear1_input, time_input, dist2_input, bear2_input,
-                    target_len_input,
-                    salvo_count_input,
-                ], spacing=15), 
-                
-                # 버튼 영역
-                ft.ElevatedButton(
-                    content=ft.Text("계산 실행 (FIRE!)", color="white", size=20, weight="bold"),
-                    on_click=calculate,
-                    width=400,
-                    height=65,
-                    style=ft.ButtonStyle(
-                        bgcolor="red900", 
-                        shape=ft.RoundedRectangleBorder(radius=12)
-                    )
-                ),
-                
-                # 결과 출력 영역
-                ft.Container(
-                    content=result_display,
-                    padding=20,
-                    bgcolor="grey950",
-                    border=ft.border.all(1, "bluegrey800"),
-                    border_radius=15,
-                    width=400
-                )
-            ],
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=25 # 섹션 간의 간격
-        ),
-        padding=ft.padding.only(top=20, bottom=40), # 상하 패딩으로 여유공간 확보
+
+    page.add(
+        ft.Column([
+            ft.Text("7C Fire Control v1.4 (ABSOLUTE)", size=24, weight="bold"),
+            ft.Row([own_speed_input, own_course_input]), # 내 배 정보 레이아웃
+            ft.Divider(),
+            dist1_input, bear1_input, time_input, dist2_input, bear2_input,
+            ft.ElevatedButton("FIRE! (Calculate)", on_click=calculate, width=400, height=50),
+            result_display
+        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER)
     )
 
-    page.add(layout)
-
-if __name__ == "__main__":
-    ft.app(target=main)
+ft.app(target=main)
